@@ -65,6 +65,14 @@ function playTimeoutSound() {
             // Play for beepDuration seconds
             oscillator.start(startTime);
             oscillator.stop(startTime + beepDuration);
+            
+            if (navigator.vibrate) {
+                const vib = [];
+                for (let i = 0; i < N; i++) {
+                    vib.push(beepDuration * 1000, pauseDuration * 1000);
+                }
+                navigator.vibrate(vib);
+            }
         }
     } catch (error) {
         console.error('Error playing sound:', error);
