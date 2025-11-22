@@ -41,11 +41,12 @@ function playTimeoutSound() {
     const pauseDuration = 0.2; // Pause between beeps in seconds
     
     try {
-        const vibrationPattern = Array.from({ length: N * 2 }, (_, i) =>
-            i % 2 === 0 ? Math.round(beepDuration * 1000) : Math.round(pauseDuration * 1000)
-        );
-
-        navigator.vibrate(vibrationPattern);
+        if (navigator.vibrate) {
+            const vibrationPattern = Array.from({ length: N * 2 }, (_, i) =>
+                i % 2 === 0 ? Math.round(beepDuration * 1000) : Math.round(pauseDuration * 1000)
+            );
+            navigator.vibrate(vibrationPattern);
+        }
 
         const ctx = initAudioContext();
         
@@ -74,6 +75,7 @@ function playTimeoutSound() {
         }
     } catch (error) {
         console.error('Error playing sound:', error);
+
         // Fallback: try to play beeps using Audio API
         try {
             const beep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjGH0fPTgjMGHm7A7+OZURAJR6Hh8sFvJgUwgM/z2IU3CB1ou+3nn00QDFCn4/C2YxwGOJHX8sx5LAUkd8fw3ZBAC');
