@@ -10,6 +10,7 @@ app.use(express.json());
 // Also serve from static for local development compatibility
 app.use(express.static(path.join(__dirname, '../public')));
 app.use('/static', express.static(path.join(__dirname, '../static')));
+app.use('/imgs', express.static(path.join(__dirname, '../imgs')));
 
 // Game state (in-memory, resets on serverless cold start)
 let gameState = {

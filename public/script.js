@@ -16,10 +16,10 @@ const startBtn = document.getElementById('startBtn');
 const clickBtn = document.getElementById('clickBtn');
 const stopBtn = document.getElementById('stopBtn');
 const resetStatsBtn = document.getElementById('resetStatsBtn');
-const timerValue = document.getElementById('timerValue');
 const targetInfo = document.getElementById('targetInfo');
 const resultFlash = document.getElementById('resultFlash');
 const resultFlashText = document.getElementById('resultFlashText');
+const resultImage = document.getElementById('resultImage');
 
 // Stats elements
 const totalStat = document.getElementById('totalStat');
@@ -279,7 +279,7 @@ async function startGame() {
             targetInfo.textContent = `Click when timer reaches ${mins}:${secsStr} - ${endMins}:${endSecsStr}`;
             
             clickBtn.disabled = false;
-            clickBtn.textContent = 'Click when ready!';
+            clickBtn.textContent = 'It is time!';
             
             // Hide result flash if visible
             resultFlash.style.display = 'none';
@@ -302,13 +302,6 @@ function updateTimer() {
     if (!isGameRunning) return;
     
     const elapsed = (Date.now() - startTime) / 1000;
-    
-    // Format as minutes:seconds.milliseconds
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-    const secsStr = secs.toFixed(2);
-    const secsPadded = secsStr.length < 5 ? '0'.repeat(5 - secsStr.length) + secsStr : secsStr;
-    timerValue.textContent = `${mins}:${secsPadded}`;
     
     // Check if time exceeded
     if (elapsed >= currentInterval) {
@@ -356,8 +349,14 @@ async function handleClick() {
             return;
         }
         
-        // Show brief result flash
-        resultFlashText.textContent = data.result === 'success' ? '✓ Success!' : '✗ Failed';
+        // Show brief result flash with appropriate image
+        if (data.result === 'success') {
+            resultImage.innerHTML = '<img src="/time_god.png" alt="Time God" style="width: 120px; height: auto;">';
+            resultFlashText.textContent = '✓ Time God Approves!';
+        } else {
+            resultImage.textContent = '🐵'; // Monkey
+            resultFlashText.textContent = '✗ Primal Monkey Says Too Early/Late!';
+        }
         resultFlash.className = `result-flash ${data.result}`;
         resultFlash.style.display = 'block';
         
@@ -446,7 +445,7 @@ function startNextRound() {
         targetInfo.textContent = `Click when timer reaches ${mins}:${secsStr} - ${endMins}:${endSecsStr}`;
         
         clickBtn.disabled = false;
-        clickBtn.textContent = 'Click when ready!';
+        clickBtn.textContent = 'It is time!';
         
         // Set startTime to current client time right before starting timer
         // This ensures the timer starts at 0:00.00 instead of showing network delay
@@ -510,8 +509,9 @@ function handleTimeout() {
             return;
         }
         
-        // Show timeout message
-        resultFlashText.textContent = '✗ Time\'s Up!';
+        // Show timeout message with monkey image
+        resultImage.textContent = '🐵'; // Monkey
+        resultFlashText.textContent = '✗ Time\'s Up! Primal Monkey Disappointed!';
         resultFlash.className = 'result-flash fail';
         resultFlash.style.display = 'block';
         

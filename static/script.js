@@ -6,6 +6,9 @@ let currentIntervalMinutes = null;
 let audioContext = null;
 let wakeLock = null;
 let notificationPermission = null;
+let isGameRunning = false;
+let pendingTimeouts = [];
+let pendingFetchAbortControllers = [];
 
 const setupPanel = document.getElementById('setupPanel');
 const gamePanel = document.getElementById('gamePanel');
@@ -13,10 +16,10 @@ const startBtn = document.getElementById('startBtn');
 const clickBtn = document.getElementById('clickBtn');
 const stopBtn = document.getElementById('stopBtn');
 const resetStatsBtn = document.getElementById('resetStatsBtn');
-const timerValue = document.getElementById('timerValue');
 const targetInfo = document.getElementById('targetInfo');
 const resultFlash = document.getElementById('resultFlash');
 const resultFlashText = document.getElementById('resultFlashText');
+const resultImage = document.getElementById('resultImage');
 
 // Stats elements
 const totalStat = document.getElementById('totalStat');
@@ -232,12 +235,18 @@ async function startGame() {
         return;
     }
     
+    // Clear any pending timeouts and abort any pending fetches from previous game
+    clearAllPendingOperations();
+    
     // Request notification permission and acquire wake lock (within user gesture)
     await requestNotificationPermission();
     await acquireWakeLock();
     
     // Pre-initialize audio context while we have user gesture
     initAudioContext();
+    
+    // Set game running flag
+    isGameRunning = true;
     
     try {
         const response = await fetch('/api/start', {
@@ -250,7 +259,7 @@ async function startGame() {
         
         const data = await response.json();
         
-        if (data.success) {
+        if (data.success && isGameRunning) {
             currentInterval = data.interval; // In seconds
             currentIntervalMinutes = data.interval_minutes;
             currentTimeBefore = timeBefore;
@@ -270,29 +279,29 @@ async function startGame() {
             targetInfo.textContent = `Click when timer reaches ${mins}:${secsStr} - ${endMins}:${endSecsStr}`;
             
             clickBtn.disabled = false;
-            clickBtn.textContent = 'Click when ready!';
+            clickBtn.textContent = 'It is time!';
             
             // Hide result flash if visible
             resultFlash.style.display = 'none';
+            
+            // Set startTime to current client time right before starting timer
+            // This ensures the timer starts at 0:00.00 instead of showing network delay
+            startTime = Date.now();
             
             // Start timer
             gameInterval = setInterval(updateTimer, 10);
         }
     } catch (error) {
+        isGameRunning = false;
         console.error('Error starting game:', error);
         alert('Error starting game. Please try again.');
     }
 }
 
 function updateTimer() {
-    const elapsed = (Date.now() - startTime) / 1000;
+    if (!isGameRunning) return;
     
-    // Format as minutes:seconds.milliseconds
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-    const secsStr = secs.toFixed(2);
-    const secsPadded = secsStr.length < 5 ? '0'.repeat(5 - secsStr.length) + secsStr : secsStr;
-    timerValue.textContent = `${mins}:${secsPadded}`;
+    const elapsed = (Date.now() - startTime) / 1000;
     
     // Check if time exceeded
     if (elapsed >= currentInterval) {
@@ -302,7 +311,7 @@ function updateTimer() {
 }
 
 async function handleClick() {
-    if (!startTime) return;
+    if (!startTime || !isGameRunning) return;
     
     clearInterval(gameInterval);
     clickBtn.disabled = true;
@@ -310,14 +319,28 @@ async function handleClick() {
     // Calculate elapsed time on client side (what the user actually sees)
     const clientElapsed = (Date.now() - startTime) / 1000;
     
+    // Create abort controller for this fetch
+    const abortController = new AbortController();
+    pendingFetchAbortControllers.push(abortController);
+    
     try {
         const response = await fetch('/api/click', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ elapsed: clientElapsed })
+            body: JSON.stringify({ elapsed: clientElapsed }),
+            signal: abortController.signal
         });
+        
+        // Remove abort controller from pending list
+        const index = pendingFetchAbortControllers.indexOf(abortController);
+        if (index > -1) {
+            pendingFetchAbortControllers.splice(index, 1);
+        }
+        
+        // Check if game is still running before processing response
+        if (!isGameRunning) return;
         
         const data = await response.json();
         
@@ -326,8 +349,14 @@ async function handleClick() {
             return;
         }
         
-        // Show brief result flash
-        resultFlashText.textContent = data.result === 'success' ? '✓ Success!' : '✗ Failed';
+        // Show brief result flash with appropriate image
+        if (data.result === 'success') {
+            resultImage.innerHTML = '<img src="/time_god.png" alt="Time God" style="width: 120px; height: auto;">';
+            resultFlashText.textContent = '✓ Time God Approves!';
+        } else {
+            resultImage.textContent = '🐵'; // Monkey
+            resultFlashText.textContent = '✗ Primal Monkey Says Too Early/Late!';
+        }
         resultFlash.className = `result-flash ${data.result}`;
         resultFlash.style.display = 'block';
         
@@ -344,19 +373,40 @@ async function handleClick() {
         updateStats(data.stats, data.history);
         
         // Automatically start next round after brief delay
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
+            if (!isGameRunning) return;
             resultFlash.style.display = 'none';
             // Start next round automatically
             startNextRound();
         }, 1500); // Show result for 1.5 seconds
+        pendingTimeouts.push(timeoutId);
         
     } catch (error) {
+        // Remove abort controller from pending list
+        const index = pendingFetchAbortControllers.indexOf(abortController);
+        if (index > -1) {
+            pendingFetchAbortControllers.splice(index, 1);
+        }
+        
+        // Ignore abort errors (game was stopped)
+        if (error.name === 'AbortError') {
+            return;
+        }
+        
         console.error('Error handling click:', error);
-        alert('Error processing click. Please try again.');
+        if (isGameRunning) {
+            alert('Error processing click. Please try again.');
+        }
     }
 }
 
 function startNextRound() {
+    if (!isGameRunning) return;
+    
+    // Create abort controller for this fetch
+    const abortController = new AbortController();
+    pendingFetchAbortControllers.push(abortController);
+    
     // Start a new round with the same settings
     fetch('/api/start', {
         method: 'POST',
@@ -366,77 +416,152 @@ function startNextRound() {
         body: JSON.stringify({ 
             interval: currentIntervalMinutes, 
             time_before: currentTimeBefore 
-        })
+        }),
+        signal: abortController.signal
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            startTime = data.start_time * 1000;
-            
-            // Format target window display
-            const targetStart = currentInterval - currentTimeBefore;
-            const mins = Math.floor(targetStart / 60);
-            const secs = Math.floor(targetStart % 60);
-            const endMins = Math.floor(currentInterval / 60);
-            const endSecs = Math.floor(currentInterval % 60);
-            const secsStr = secs < 10 ? '0' + secs : '' + secs;
-            const endSecsStr = endSecs < 10 ? '0' + endSecs : '' + endSecs;
-            targetInfo.textContent = `Click when timer reaches ${mins}:${secsStr} - ${endMins}:${endSecsStr}`;
-            
-            clickBtn.disabled = false;
-            clickBtn.textContent = 'Click when ready!';
-            
-            // Start timer
-            gameInterval = setInterval(updateTimer, 10);
+    .then(response => {
+        // Remove abort controller from pending list
+        const index = pendingFetchAbortControllers.indexOf(abortController);
+        if (index > -1) {
+            pendingFetchAbortControllers.splice(index, 1);
         }
+        
+        // Check if game is still running before processing response
+        if (!isGameRunning) return null;
+        
+        return response.json();
+    })
+    .then(data => {
+        if (!isGameRunning || !data || !data.success) return;
+        
+        // Format target window display
+        const targetStart = currentInterval - currentTimeBefore;
+        const mins = Math.floor(targetStart / 60);
+        const secs = Math.floor(targetStart % 60);
+        const endMins = Math.floor(currentInterval / 60);
+        const endSecs = Math.floor(currentInterval % 60);
+        const secsStr = secs < 10 ? '0' + secs : '' + secs;
+        const endSecsStr = endSecs < 10 ? '0' + endSecs : '' + endSecs;
+        targetInfo.textContent = `Click when timer reaches ${mins}:${secsStr} - ${endMins}:${endSecsStr}`;
+        
+        clickBtn.disabled = false;
+        clickBtn.textContent = 'It is time!';
+        
+        // Set startTime to current client time right before starting timer
+        // This ensures the timer starts at 0:00.00 instead of showing network delay
+        startTime = Date.now();
+        
+        // Start timer
+        gameInterval = setInterval(updateTimer, 10);
     })
     .catch(error => {
-        console.error('Error starting next round:', error);
+        // Remove abort controller from pending list
+        const index = pendingFetchAbortControllers.indexOf(abortController);
+        if (index > -1) {
+            pendingFetchAbortControllers.splice(index, 1);
+        }
+        
+        // Ignore abort errors (game was stopped)
+        if (error.name !== 'AbortError') {
+            console.error('Error starting next round:', error);
+        }
     });
 }
 
 function handleTimeout() {
+    if (!isGameRunning) return;
+    
     clearInterval(gameInterval);
     clickBtn.disabled = true;
     
     // Play timeout sound
     playTimeoutSound();
     
+    // Create abort controller for this fetch
+    const abortController = new AbortController();
+    pendingFetchAbortControllers.push(abortController);
+    
     // Call timeout endpoint to record failure
     fetch('/api/timeout', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
-        }
+        },
+        signal: abortController.signal
     })
-    .then(response => response.json())
+    .then(response => {
+        // Remove abort controller from pending list
+        const index = pendingFetchAbortControllers.indexOf(abortController);
+        if (index > -1) {
+            pendingFetchAbortControllers.splice(index, 1);
+        }
+        
+        // Check if game is still running before processing response
+        if (!isGameRunning) return null;
+        
+        return response.json();
+    })
     .then(data => {
+        if (!isGameRunning || !data) return;
+        
         if (data.error) {
             console.error('Error handling timeout:', data.error);
             return;
         }
         
-        // Show timeout message
-        resultFlashText.textContent = '✗ Time\'s Up!';
+        // Show timeout message with monkey image
+        resultImage.textContent = '🐵'; // Monkey
+        resultFlashText.textContent = '✗ Time\'s Up! Primal Monkey Disappointed!';
         resultFlash.className = 'result-flash fail';
         resultFlash.style.display = 'block';
+        
+        // Vibration is already handled in playTimeoutSound()
         
         // Update stats and chart
         updateStats(data.stats, data.history);
         
         // Automatically start next round after brief delay
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
+            if (!isGameRunning) return;
             resultFlash.style.display = 'none';
             startNextRound();
         }, 1500);
+        pendingTimeouts.push(timeoutId);
     })
     .catch(error => {
-        console.error('Error handling timeout:', error);
+        // Remove abort controller from pending list
+        const index = pendingFetchAbortControllers.indexOf(abortController);
+        if (index > -1) {
+            pendingFetchAbortControllers.splice(index, 1);
+        }
+        
+        // Ignore abort errors (game was stopped)
+        if (error.name !== 'AbortError') {
+            console.error('Error handling timeout:', error);
+        }
     });
 }
 
+function clearAllPendingOperations() {
+    // Clear all pending timeouts
+    pendingTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+    pendingTimeouts = [];
+    
+    // Abort all pending fetch requests
+    pendingFetchAbortControllers.forEach(controller => controller.abort());
+    pendingFetchAbortControllers = [];
+}
+
 function stopGame() {
+    // Set flag to stop game immediately
+    isGameRunning = false;
+    
+    // Clear the main game interval
     clearInterval(gameInterval);
+    gameInterval = null;
+    
+    // Clear all pending timeouts and abort pending fetches
+    clearAllPendingOperations();
     
     // Release wake lock when stopping game
     releaseWakeLock();
@@ -460,6 +585,9 @@ function initChart() {
         performanceChart.destroy();
     }
     
+    // Detect if we're on mobile
+    const isMobile = window.innerWidth <= 768;
+    
     const ctx = chartCanvas.getContext('2d');
     performanceChart = new Chart(ctx, {
         type: 'scatter',
@@ -471,8 +599,9 @@ function initChart() {
                     data: [],
                     borderColor: '#28a745',
                     backgroundColor: '#28a745',
-                    pointRadius: 6,
-                    pointHoverRadius: 8,
+                    pointRadius: isMobile ? 8 : 6,
+                    pointHoverRadius: isMobile ? 10 : 8,
+                    pointBorderWidth: 2,
                     showLine: false
                 },
                 {
@@ -480,15 +609,16 @@ function initChart() {
                     data: [],
                     borderColor: '#dc3545',
                     backgroundColor: '#dc3545',
-                    pointRadius: 6,
-                    pointHoverRadius: 8,
+                    pointRadius: isMobile ? 8 : 6,
+                    pointHoverRadius: isMobile ? 10 : 8,
+                    pointBorderWidth: 2,
                     showLine: false
                 }
             ]
         },
         options: {
             responsive: true,
-            maintainAspectRatio: true,
+            maintainAspectRatio: !isMobile,
             scales: {
                 y: {
                     display: false,
@@ -513,6 +643,13 @@ function initChart() {
                 tooltip: {
                     mode: 'index',
                     intersect: false
+                }
+            },
+            elements: {
+                point: {
+                    radius: isMobile ? 8 : 6,
+                    hoverRadius: isMobile ? 10 : 8,
+                    borderWidth: 2
                 }
             }
         }
@@ -591,6 +728,27 @@ fetch('/api/stats')
     .then(response => response.json())
     .then(data => updateStats(data.stats, data.history))
     .catch(error => console.error('Error loading stats:', error));
+
+// Handle window resize to update chart for mobile/desktop changes
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+        if (performanceChart) {
+            // Save current data
+            const currentData = {
+                successData: [...performanceChart.data.datasets[0].data],
+                failData: [...performanceChart.data.datasets[1].data]
+            };
+            // Reinitialize chart with new mobile/desktop settings
+            initChart();
+            // Restore data
+            performanceChart.data.datasets[0].data = currentData.successData;
+            performanceChart.data.datasets[1].data = currentData.failData;
+            performanceChart.update();
+        }
+    }, 250);
+});
 
 // Handle visibility change to reacquire wake lock if needed
 document.addEventListener('visibilitychange', async () => {

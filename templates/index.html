@@ -11,7 +11,11 @@
 </head>
 <body>
     <div class="container">
-        <h1>Primal Clock Trainer</h1>
+        <h1 class="title-with-icons">
+            <span class="title-icon title-icon-left">🐵</span>
+            <span class="title-text">Primal Clock Trainer</span>
+            <img src="/time_god.png" alt="Time God" class="title-icon title-icon-right">
+        </h1>
         <p class="subtitle">Train your ability to perceive and predict time intervals</p>
         
         <div class="setup-panel" id="setupPanel">
@@ -31,14 +35,11 @@
         
         <div class="game-panel" id="gamePanel" style="display: none;">
             <div class="result-flash" id="resultFlash" style="display: none;">
+                <div class="result-image" id="resultImage"></div>
                 <span id="resultFlashText"></span>
             </div>
-            <div class="timer-display">
-                <div class="timer-value" id="timerValue">0:00.00</div>
-                <div class="timer-label">time elapsed</div>
-            </div>
             <div class="target-info" id="targetInfo"></div>
-            <button id="clickBtn" class="btn btn-game" disabled>Click when ready!</button>
+            <button id="clickBtn" class="btn btn-game" disabled>It is time!</button>
             <button id="stopBtn" class="btn btn-secondary">Stop Game</button>
         </div>
         
