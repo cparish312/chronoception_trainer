@@ -8,7 +8,9 @@ A web application to train your ability to perceive and predict time intervals (
 - Real-time timer display in minutes:seconds format
 - Continuous gameplay - automatically continues after each attempt
 - Success/failure tracking with live statistics
+- Sound notification when timer expires
 - Clean, modern UI with visual feedback
+- Deployable on Vercel
 
 ## Setup
 
@@ -55,4 +57,27 @@ http://127.0.0.1:5000
 
 - Python 3.7+
 - Flask 3.0.0+
+
+## Deployment on Vercel
+
+This app is configured to deploy on Vercel:
+
+1. **Install Vercel CLI** (if not already installed):
+```bash
+npm install -g vercel
+```
+
+2. **Deploy to Vercel**:
+```bash
+vercel
+```
+
+3. **Follow the prompts** to link your project and deploy.
+
+The app will be automatically configured with:
+- Serverless function handler in `api/index.py`
+- Static files served from `static/` and `templates/`
+- All routes handled by the Flask app
+
+**Note**: Game state is stored in memory, so statistics will reset on serverless function cold starts. For production use with persistent state, consider using a database or external storage.
 

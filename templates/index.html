@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chronoception Trainer</title>
+    <title>Primal Clock Trainer</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <h1>Chronoception Trainer</h1>
+        <h1>Primal Clock Trainer</h1>
         <p class="subtitle">Train your ability to perceive and predict time intervals</p>
         
         <div class="setup-panel" id="setupPanel">
@@ -60,6 +61,11 @@
                 </div>
             </div>
             <button id="resetStatsBtn" class="btn btn-secondary">Reset Stats</button>
+            
+            <div class="chart-container">
+                <h3>Performance Over Time</h3>
+                <canvas id="performanceChart"></canvas>
+            </div>
         </div>
     </div>
     

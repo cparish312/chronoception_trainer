@@ -14,7 +14,8 @@ game_state = {
         'total': 0,
         'success': 0,
         'fail': 0
-    }
+    },
+    'history': []  # List of {'result': 'success'/'fail', 'timestamp': time.time()}
 }
 
 @app.route('/')
@@ -79,6 +80,16 @@ def handle_click():
         else:
             message = f'Too late! You clicked at {mins}:{secs:05.2f}'
     
+    # Add to history
+    game_state['history'].append({
+        'result': result,
+        'timestamp': time.time()
+    })
+    
+    # Keep only last 100 entries to prevent memory issues
+    if len(game_state['history']) > 100:
+        game_state['history'] = game_state['history'][-100:]
+    
     # Automatically start next round - don't reset is_running
     # Just update the start_time for the next round
     game_state['start_time'] = time.time()
@@ -89,6 +100,7 @@ def handle_click():
         'elapsed': elapsed,
         'target_window': [lower_bound, upper_bound],
         'stats': game_state['stats'],
+        'history': game_state['history'],
         'continue': True  # Signal to continue automatically
     })
 
@@ -100,7 +112,10 @@ def reset_game():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    return jsonify(game_state['stats'])
+    return jsonify({
+        'stats': game_state['stats'],
+        'history': game_state['history']
+    })
 
 @app.route('/api/timeout', methods=['POST'])
 def handle_timeout():
@@ -111,6 +126,16 @@ def handle_timeout():
     game_state['stats']['total'] += 1
     game_state['stats']['fail'] += 1
     
+    # Add to history
+    game_state['history'].append({
+        'result': 'fail',
+        'timestamp': time.time()
+    })
+    
+    # Keep only last 100 entries to prevent memory issues
+    if len(game_state['history']) > 100:
+        game_state['history'] = game_state['history'][-100:]
+    
     # Automatically start next round
     game_state['start_time'] = time.time()
     
@@ -118,12 +143,14 @@ def handle_timeout():
         'result': 'fail',
         'message': "Time's up! You didn't click in time.",
         'stats': game_state['stats'],
+        'history': game_state['history'],
         'continue': True
     })
 
 @app.route('/api/reset_stats', methods=['POST'])
 def reset_stats():
     game_state['stats'] = {'total': 0, 'success': 0, 'fail': 0}
+    game_state['history'] = []
     return jsonify({'success': True})
 
 if __name__ == '__main__':
