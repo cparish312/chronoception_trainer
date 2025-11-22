@@ -34,6 +34,17 @@ function initAudioContext() {
     return audioContext;
 }
 
+// Vibrate phone with a pattern
+function vibrate(pattern) {
+    if (navigator.vibrate) {
+        try {
+            navigator.vibrate(pattern);
+        } catch (error) {
+            console.error('Error vibrating:', error);
+        }
+    }
+}
+
 // Play beep sound when timer expires (repeats N=6 times)
 function playTimeoutSound() {
     const N = 6; // Number of times to repeat the sound
@@ -41,12 +52,11 @@ function playTimeoutSound() {
     const pauseDuration = 0.2; // Pause between beeps in seconds
     
     try {
-        if (navigator.vibrate) {
-            const vibrationPattern = Array.from({ length: N * 2 }, (_, i) =>
-                i % 2 === 0 ? Math.round(beepDuration * 1000) : Math.round(pauseDuration * 1000)
-            );
-            navigator.vibrate(vibrationPattern);
-        }
+        // Vibrate with pattern matching the beeps
+        const vibrationPattern = Array.from({ length: N * 2 }, (_, i) =>
+            i % 2 === 0 ? Math.round(beepDuration * 1000) : Math.round(pauseDuration * 1000)
+        );
+        vibrate(vibrationPattern);
 
         const ctx = initAudioContext();
         
@@ -146,6 +156,10 @@ async function startGame() {
             // Hide result flash if visible
             resultFlash.style.display = 'none';
             
+            // Set startTime to current client time right before starting timer
+            // This ensures the timer starts at 0:00.00 instead of showing network delay
+            startTime = Date.now();
+            
             // Start timer
             gameInterval = setInterval(updateTimer, 10);
         }
@@ -178,12 +192,16 @@ async function handleClick() {
     clearInterval(gameInterval);
     clickBtn.disabled = true;
     
+    // Calculate elapsed time on client side (what the user actually sees)
+    const clientElapsed = (Date.now() - startTime) / 1000;
+    
     try {
         const response = await fetch('/api/click', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            body: JSON.stringify({ elapsed: clientElapsed })
         });
         
         const data = await response.json();
@@ -197,6 +215,15 @@ async function handleClick() {
         resultFlashText.textContent = data.result === 'success' ? '✓ Success!' : '✗ Failed';
         resultFlash.className = `result-flash ${data.result}`;
         resultFlash.style.display = 'block';
+        
+        // Vibrate based on result
+        if (data.result === 'success') {
+            // Success: two short vibrations
+            vibrate([100, 50, 100]);
+        } else {
+            // Failure: one longer vibration
+            vibrate([200]);
+        }
         
         // Update stats and chart
         updateStats(data.stats, data.history);
@@ -229,8 +256,6 @@ function startNextRound() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            startTime = data.start_time * 1000;
-            
             // Format target window display
             const targetStart = currentInterval - currentTimeBefore;
             const mins = Math.floor(targetStart / 60);
@@ -243,6 +268,10 @@ function startNextRound() {
             
             clickBtn.disabled = false;
             clickBtn.textContent = 'Click when ready!';
+            
+            // Set startTime to current client time right before starting timer
+            // This ensures the timer starts at 0:00.00 instead of showing network delay
+            startTime = Date.now();
             
             // Start timer
             gameInterval = setInterval(updateTimer, 10);
@@ -278,6 +307,8 @@ function handleTimeout() {
         resultFlashText.textContent = '✗ Time\'s Up!';
         resultFlash.className = 'result-flash fail';
         resultFlash.style.display = 'block';
+        
+        // Vibration is already handled in playTimeoutSound()
         
         // Update stats and chart
         updateStats(data.stats, data.history);

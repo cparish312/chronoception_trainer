@@ -62,8 +62,11 @@ app.post('/api/click', (req, res) => {
     return res.status(400).json({ error: 'Game not running' });
   }
   
-  const currentTime = Date.now() / 1000; // Convert to seconds
-  const elapsed = currentTime - gameState.startTime;
+  // Use elapsed time from client (what the user actually saw)
+  // Fallback to server-calculated time if not provided
+  const elapsed = req.body.elapsed !== undefined 
+    ? req.body.elapsed 
+    : (Date.now() / 1000 - gameState.startTime);
   
   // User needs to click within time_before seconds before the interval ends
   const lowerBound = gameState.interval - gameState.timeBefore;
@@ -101,8 +104,8 @@ app.post('/api/click', (req, res) => {
     gameState.history = gameState.history.slice(-100);
   }
   
-  // Automatically start next round
-  gameState.startTime = Date.now() / 1000;
+  // Note: startTime will be set when client calls /api/start for next round
+  // Client sets its own startTime when timer display begins
   
   res.json({
     result: result,
@@ -147,8 +150,8 @@ app.post('/api/timeout', (req, res) => {
     gameState.history = gameState.history.slice(-100);
   }
   
-  // Automatically start next round
-  gameState.startTime = Date.now() / 1000;
+  // Note: startTime will be set when client calls /api/start for next round
+  // Client sets its own startTime when timer display begins
   
   res.json({
     result: 'fail',
