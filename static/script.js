@@ -4,6 +4,8 @@ let currentInterval = null;
 let currentTimeBefore = null;
 let currentIntervalMinutes = null;
 let audioContext = null;
+let wakeLock = null;
+let notificationPermission = null;
 
 const setupPanel = document.getElementById('setupPanel');
 const gamePanel = document.getElementById('gamePanel');
@@ -31,7 +33,84 @@ function initAudioContext() {
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
+    // Resume audio context if it's suspended (e.g., when page was in background)
+    if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(err => {
+            console.error('Error resuming audio context:', err);
+        });
+    }
     return audioContext;
+}
+
+// Vibrate phone with a pattern
+// On Android Chrome, vibration requires user gesture, so we use notifications as fallback
+function vibrate(pattern) {
+    if (navigator.vibrate) {
+        try {
+            // Try direct vibration first
+            const result = navigator.vibrate(pattern);
+            // If it returns false, it might be blocked - try notification vibration
+            if (result === false && 'Notification' in window && notificationPermission === 'granted') {
+                // Vibration will be handled via notification
+                return false;
+            }
+            return result;
+        } catch (error) {
+            console.error('Error vibrating:', error);
+            return false;
+        }
+    }
+    return false;
+}
+
+// Request notification permission (needed for vibration when page is in background)
+async function requestNotificationPermission() {
+    if (!('Notification' in window)) {
+        return false;
+    }
+    
+    if (Notification.permission === 'granted') {
+        notificationPermission = 'granted';
+        return true;
+    }
+    
+    if (Notification.permission !== 'denied') {
+        try {
+            const permission = await Notification.requestPermission();
+            notificationPermission = permission;
+            return permission === 'granted';
+        } catch (error) {
+            console.error('Error requesting notification permission:', error);
+            return false;
+        }
+    }
+    
+    return false;
+}
+
+// Acquire wake lock to keep screen/page active
+async function acquireWakeLock() {
+    if ('wakeLock' in navigator) {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => {
+                console.log('Wake lock released');
+            });
+            return true;
+        } catch (error) {
+            console.error('Error acquiring wake lock:', error);
+            return false;
+        }
+    }
+    return false;
+}
+
+// Release wake lock
+function releaseWakeLock() {
+    if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+    }
 }
 
 // Play beep sound when timer expires (repeats N=6 times)
@@ -40,48 +119,99 @@ function playTimeoutSound() {
     const beepDuration = 0.3; // Duration of each beep in seconds
     const pauseDuration = 0.2; // Pause between beeps in seconds
     
+    // Vibrate with pattern matching the beeps
+    const vibrationPattern = Array.from({ length: N * 2 }, (_, i) =>
+        i % 2 === 0 ? Math.round(beepDuration * 1000) : Math.round(pauseDuration * 1000)
+    );
+    
+    // Try to vibrate directly (works if called from user gesture)
+    const vibrationWorked = vibrate(vibrationPattern);
+    
+    // If vibration didn't work (e.g., no user gesture context), use notification
+    if (!vibrationWorked && 'Notification' in window && notificationPermission === 'granted') {
+        try {
+            const notification = new Notification('Time\'s Up!', {
+                body: 'Click to return to the game',
+                tag: 'timeout',
+                requireInteraction: false,
+                vibrate: vibrationPattern,
+                silent: false // This allows sound to play
+            });
+            
+            notification.onclick = () => {
+                window.focus();
+                notification.close();
+            };
+            
+            // Auto-close after 3 seconds
+            setTimeout(() => notification.close(), 3000);
+        } catch (error) {
+            console.error('Error showing notification:', error);
+        }
+    }
+    
     try {
         const ctx = initAudioContext();
         
-        // Play N beeps with pauses between them
-        for (let i = 0; i < N; i++) {
-            const startTime = ctx.currentTime + i * (beepDuration + pauseDuration);
-            
-            const oscillator = ctx.createOscillator();
-            const gainNode = ctx.createGain();
-            
-            oscillator.connect(gainNode);
-            gainNode.connect(ctx.destination);
-            
-            // Set frequency and type for a beep sound
-            oscillator.frequency.value = 800; // 800 Hz
-            oscillator.type = 'sine';
-            
-            // Set volume envelope (fade in/out)
-            gainNode.gain.setValueAtTime(0, startTime);
-            gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.01);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + beepDuration);
-            
-            // Play for beepDuration seconds
-            oscillator.start(startTime);
-            oscillator.stop(startTime + beepDuration);
+        // Ensure audio context is resumed (critical for background playback)
+        if (ctx.state === 'suspended') {
+            ctx.resume().then(() => {
+                playBeeps(ctx, N, beepDuration, pauseDuration);
+            }).catch(err => {
+                console.error('Error resuming audio context:', err);
+                // Fallback to Audio API
+                playBeepsFallback(N, beepDuration, pauseDuration);
+            });
+        } else {
+            playBeeps(ctx, N, beepDuration, pauseDuration);
         }
     } catch (error) {
         console.error('Error playing sound:', error);
-        // Fallback: try to play beeps using Audio API
-        try {
-            const beep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjGH0fPTgjMGHm7A7+OZURAJR6Hh8sFvJgUwgM/z2IU3CB1ou+3nn00QDFCn4/C2YxwGOJHX8sx5LAUkd8fw3ZBAC');
-            // Play N times with delays
-            for (let i = 0; i < N; i++) {
-                setTimeout(() => {
-                    beep.cloneNode().play().catch(() => {
-                        // Ignore if autoplay is blocked
-                    });
-                }, i * (beepDuration * 1000 + pauseDuration * 1000));
-            }
-        } catch (e) {
-            // Silently fail if audio is not available
+        playBeepsFallback(N, beepDuration, pauseDuration);
+    }
+}
+
+// Helper function to play beeps using Web Audio API
+function playBeeps(ctx, N, beepDuration, pauseDuration) {
+    for (let i = 0; i < N; i++) {
+        const startTime = ctx.currentTime + i * (beepDuration + pauseDuration);
+        
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        
+        // Set frequency and type for a beep sound
+        oscillator.frequency.value = 800; // 800 Hz
+        oscillator.type = 'sine';
+        
+        // Set volume envelope (fade in/out)
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.01);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + beepDuration);
+        
+        // Play for beepDuration seconds
+        oscillator.start(startTime);
+        oscillator.stop(startTime + beepDuration);
+    }
+}
+
+// Fallback: try to play beeps using Audio API
+function playBeepsFallback(N, beepDuration, pauseDuration) {
+    try {
+        const beep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjGH0fPTgjMGHm7A7+OZURAJR6Hh8sFvJgUwgM/z2IU3CB1ou+3nn00QDFCn4/C2YxwGOJHX8sx5LAUkd8fw3ZBAC');
+        // Play N times with delays
+        for (let i = 0; i < N; i++) {
+            setTimeout(() => {
+                const audioClone = beep.cloneNode();
+                audioClone.play().catch(() => {
+                    // Ignore if autoplay is blocked
+                });
+            }, i * (beepDuration * 1000 + pauseDuration * 1000));
         }
+    } catch (e) {
+        // Silently fail if audio is not available
     }
 }
 
@@ -101,6 +231,13 @@ async function startGame() {
         alert('Invalid parameters! Time before (in seconds) must be less than interval (in minutes converted to seconds).');
         return;
     }
+    
+    // Request notification permission and acquire wake lock (within user gesture)
+    await requestNotificationPermission();
+    await acquireWakeLock();
+    
+    // Pre-initialize audio context while we have user gesture
+    initAudioContext();
     
     try {
         const response = await fetch('/api/start', {
@@ -170,12 +307,16 @@ async function handleClick() {
     clearInterval(gameInterval);
     clickBtn.disabled = true;
     
+    // Calculate elapsed time on client side (what the user actually sees)
+    const clientElapsed = (Date.now() - startTime) / 1000;
+    
     try {
         const response = await fetch('/api/click', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            body: JSON.stringify({ elapsed: clientElapsed })
         });
         
         const data = await response.json();
@@ -189,6 +330,15 @@ async function handleClick() {
         resultFlashText.textContent = data.result === 'success' ? '✓ Success!' : '✗ Failed';
         resultFlash.className = `result-flash ${data.result}`;
         resultFlash.style.display = 'block';
+        
+        // Vibrate based on result
+        if (data.result === 'success') {
+            // Success: two short vibrations
+            vibrate([100, 50, 100]);
+        } else {
+            // Failure: one longer vibration
+            vibrate([200]);
+        }
         
         // Update stats and chart
         updateStats(data.stats, data.history);
@@ -287,6 +437,9 @@ function handleTimeout() {
 
 function stopGame() {
     clearInterval(gameInterval);
+    
+    // Release wake lock when stopping game
+    releaseWakeLock();
     
     fetch('/api/reset', {
         method: 'POST'
@@ -438,4 +591,12 @@ fetch('/api/stats')
     .then(response => response.json())
     .then(data => updateStats(data.stats, data.history))
     .catch(error => console.error('Error loading stats:', error));
+
+// Handle visibility change to reacquire wake lock if needed
+document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && gameInterval && !wakeLock) {
+        // Reacquire wake lock if game is running and we lost it
+        await acquireWakeLock();
+    }
+});
 
