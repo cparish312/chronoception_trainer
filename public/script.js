@@ -352,10 +352,43 @@ async function handleClick() {
         // Show brief result flash with appropriate image
         if (data.result === 'success') {
             resultImage.innerHTML = '<img src="/time_god.png" alt="Time God" style="width: 120px; height: auto;">';
-            resultFlashText.textContent = '✓ Time God Approves!';
+            
+            // Show exact time they got it on
+            if (data.elapsed !== undefined) {
+                const elapsedMins = Math.floor(data.elapsed / 60);
+                const elapsedSecs = (data.elapsed % 60).toFixed(2);
+                const elapsedStr = `${elapsedMins}:${elapsedSecs.padStart(5, '0')}`;
+                resultFlashText.textContent = `✓ Time God Approves! Clicked at: ${elapsedStr}`;
+                console.log(`Success! Clicked at: ${elapsedStr}`);
+            } else {
+                resultFlashText.textContent = '✓ Time God Approves!';
+            }
         } else {
             resultImage.textContent = '🐵'; // Monkey
-            resultFlashText.textContent = '✗ Primal Monkey Says Too Early/Late!';
+            let failureMessage = '✗ Primal Monkey Says Too Early/Late!';
+            
+            // If too early, print interval and how early they were (relative to interval end)
+            if (data.target_window && data.elapsed !== undefined && currentInterval) {
+                const [lowerBound, upperBound] = data.target_window;
+                if (data.elapsed < lowerBound) {
+                    // Calculate how early relative to interval end
+                    const howEarly = currentInterval - data.elapsed;
+                    const intervalMins = Math.floor(currentInterval / 60);
+                    const intervalSecs = (currentInterval % 60).toFixed(2);
+                    const earlyMins = Math.floor(howEarly / 60);
+                    const earlySecs = (howEarly % 60).toFixed(2);
+                    
+                    const intervalStr = `${intervalMins}:${intervalSecs.padStart(5, '0')}`;
+                    const earlyStr = earlyMins > 0 
+                        ? `${earlyMins}:${earlySecs.padStart(5, '0')}` 
+                        : `${earlySecs}s`;
+                    
+                    console.log(`Interval: ${intervalStr}, Too early by: ${earlyStr}`);
+                    failureMessage = `✗ Too Early! Interval: ${intervalStr}, Early by: ${earlyStr}`;
+                }
+            }
+            
+            resultFlashText.textContent = failureMessage;
         }
         resultFlash.className = `result-flash ${data.result}`;
         resultFlash.style.display = 'block';
