@@ -256,7 +256,26 @@ h2 {
     text-align: center;
 }
 
-.chart-container canvas {
-    max-height: 300px;
+.chart-container {
+    position: relative;
+    width: 100%;
+}
+  
+#performanceChart {
+    width: 100%;
+    display: block;
+}
+
+/* --- MOBILE ONLY --- */
+@media (max-width: 768px) {
+    .chart-container {
+        height: 240px;        /* give it a real height on mobile */
+        max-height: 40vh;
+    }
+
+    #performanceChart {
+        height: 100% !important;
+        width: 100% !important;
+    }
 }
 
