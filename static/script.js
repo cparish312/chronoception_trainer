@@ -9,6 +9,7 @@ let notificationPermission = null;
 let isGameRunning = false;
 let pendingTimeouts = [];
 let pendingFetchAbortControllers = [];
+let serviceWorkerRegistration = null;
 
 const setupPanel = document.getElementById('setupPanel');
 const gamePanel = document.getElementById('gamePanel');
@@ -30,6 +31,62 @@ const accuracyStat = document.getElementById('accuracyStat');
 // Chart initialization
 let performanceChart = null;
 const chartCanvas = document.getElementById('performanceChart');
+
+// Register Service Worker for background notifications
+async function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        try {
+            const registration = await navigator.serviceWorker.register('/sw.js');
+            serviceWorkerRegistration = registration;
+            console.log('Service Worker registered successfully');
+            
+            // Listen for messages from service worker
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data && event.data.type === 'TIMEOUT_DETECTED') {
+                    // Service worker detected a timeout, handle it
+                    // Only handle if we haven't already processed it
+                    if (isGameRunning && clickBtn && !clickBtn.disabled) {
+                        handleTimeout();
+                    }
+                }
+            });
+            
+            // Also listen for page visibility changes to check for missed timeouts
+            document.addEventListener('visibilitychange', async () => {
+                if (document.visibilityState === 'visible' && isGameRunning && startTime) {
+                    // Check if we missed a timeout while in background
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    if (elapsed >= currentInterval && clickBtn && !clickBtn.disabled) {
+                        // We missed the timeout, handle it now
+                        handleTimeout();
+                    }
+                }
+            });
+            
+            // Handle service worker updates
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        // New service worker available, prompt user to refresh
+                        console.log('New service worker available');
+                    }
+                });
+            });
+        } catch (error) {
+            console.error('Service Worker registration failed:', error);
+        }
+    }
+}
+
+// Send message to service worker
+function sendMessageToServiceWorker(message) {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage(message);
+    } else if (serviceWorkerRegistration && serviceWorkerRegistration.active) {
+        serviceWorkerRegistration.active.postMessage(message);
+    }
+}
 
 // Initialize audio context (lazy initialization)
 function initAudioContext() {
@@ -288,6 +345,14 @@ async function startGame() {
             // This ensures the timer starts at 0:00.00 instead of showing network delay
             startTime = Date.now();
             
+            // Notify service worker about the timeout time
+            if (data.timeout_time) {
+                sendMessageToServiceWorker({
+                    type: 'START_GAME',
+                    timeoutTime: data.timeout_time
+                });
+            }
+            
             // Start timer
             gameInterval = setInterval(updateTimer, 10);
         }
@@ -315,6 +380,11 @@ async function handleClick() {
     
     clearInterval(gameInterval);
     clickBtn.disabled = true;
+    
+    // Stop service worker timeout checking since user clicked
+    sendMessageToServiceWorker({
+        type: 'STOP_GAME'
+    });
     
     // Calculate elapsed time on client side (what the user actually sees)
     const clientElapsed = (Date.now() - startTime) / 1000;
@@ -484,6 +554,14 @@ function startNextRound() {
         // This ensures the timer starts at 0:00.00 instead of showing network delay
         startTime = Date.now();
         
+        // Notify service worker about the new timeout time
+        if (data.timeout_time) {
+            sendMessageToServiceWorker({
+                type: 'START_GAME',
+                timeoutTime: data.timeout_time
+            });
+        }
+        
         // Start timer
         gameInterval = setInterval(updateTimer, 10);
     })
@@ -506,6 +584,11 @@ function handleTimeout() {
     
     clearInterval(gameInterval);
     clickBtn.disabled = true;
+    
+    // Stop service worker timeout checking
+    sendMessageToServiceWorker({
+        type: 'STOP_GAME'
+    });
     
     // Play timeout sound
     playTimeoutSound();
@@ -595,6 +678,11 @@ function stopGame() {
     
     // Clear all pending timeouts and abort pending fetches
     clearAllPendingOperations();
+    
+    // Notify service worker to stop checking for timeouts
+    sendMessageToServiceWorker({
+        type: 'STOP_GAME'
+    });
     
     // Release wake lock when stopping game
     releaseWakeLock();
@@ -755,6 +843,9 @@ async function resetStats() {
 
 // Initialize chart on page load
 initChart();
+
+// Register service worker on page load
+registerServiceWorker();
 
 // Load initial stats and history
 fetch('/api/stats')

@@ -18,6 +18,7 @@ let gameState = {
   interval: null,
   timeBefore: null,
   startTime: null,
+  timeoutTime: null, // When the timeout should occur (in milliseconds)
   stats: {
     total: 0,
     success: 0,
@@ -48,13 +49,16 @@ app.post('/api/start', (req, res) => {
   gameState.timeBefore = timeBefore;
   gameState.isRunning = true;
   gameState.startTime = Date.now() / 1000; // Convert to seconds
+  // Calculate when timeout should occur (in milliseconds for client)
+  gameState.timeoutTime = Date.now() + (intervalSeconds * 1000);
   
   res.json({
     success: true,
     interval: intervalSeconds,
     interval_minutes: intervalMinutes,
     time_before: timeBefore,
-    start_time: gameState.startTime
+    start_time: gameState.startTime,
+    timeout_time: gameState.timeoutTime // When timeout should occur (milliseconds)
   });
 });
 
@@ -105,6 +109,9 @@ app.post('/api/click', (req, res) => {
     gameState.history = gameState.history.slice(-100);
   }
   
+  // Reset timeout time since user clicked
+  gameState.timeoutTime = null;
+  
   // Note: startTime will be set when client calls /api/start for next round
   // Client sets its own startTime when timer display begins
   
@@ -122,6 +129,7 @@ app.post('/api/click', (req, res) => {
 app.post('/api/reset', (req, res) => {
   gameState.isRunning = false;
   gameState.startTime = null;
+  gameState.timeoutTime = null;
   res.json({ success: true });
 });
 
@@ -151,6 +159,9 @@ app.post('/api/timeout', (req, res) => {
     gameState.history = gameState.history.slice(-100);
   }
   
+  // Reset timeout time since this timeout was handled
+  gameState.timeoutTime = null;
+  
   // Note: startTime will be set when client calls /api/start for next round
   // Client sets its own startTime when timer display begins
   
@@ -167,6 +178,23 @@ app.post('/api/reset_stats', (req, res) => {
   gameState.stats = { total: 0, success: 0, fail: 0 };
   gameState.history = [];
   res.json({ success: true });
+});
+
+// Check if timeout has occurred (called by service worker)
+app.get('/api/check_timeout', (req, res) => {
+  if (!gameState.isRunning || !gameState.timeoutTime) {
+    return res.json({ timedOut: false, isRunning: false });
+  }
+  
+  const now = Date.now();
+  const timedOut = now >= gameState.timeoutTime;
+  
+  res.json({
+    timedOut: timedOut,
+    isRunning: gameState.isRunning,
+    timeoutTime: gameState.timeoutTime,
+    currentTime: now
+  });
 });
 
 // For local development
