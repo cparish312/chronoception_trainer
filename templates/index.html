@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chronoception Trainer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Chronoception Trainer</h1>
+        <p class="subtitle">Train your ability to perceive and predict time intervals</p>
+        
+        <div class="setup-panel" id="setupPanel">
+            <h2>Game Settings</h2>
+            <div class="form-group">
+                <label for="interval">Target Interval (minutes):</label>
+                <input type="number" id="interval" min="0.1" max="60" step="0.1" value="1" required>
+                <small>The total duration you need to predict (in minutes)</small>
+            </div>
+            <div class="form-group">
+                <label for="timeBefore">Time Before (seconds):</label>
+                <input type="number" id="timeBefore" min="1" max="30" step="1" value="5" required>
+                <small>How many seconds before the interval ends you need to click</small>
+            </div>
+            <button id="startBtn" class="btn btn-primary">Start Game</button>
+        </div>
+        
+        <div class="game-panel" id="gamePanel" style="display: none;">
+            <div class="result-flash" id="resultFlash" style="display: none;">
+                <span id="resultFlashText"></span>
+            </div>
+            <div class="timer-display">
+                <div class="timer-value" id="timerValue">0:00.00</div>
+                <div class="timer-label">time elapsed</div>
+            </div>
+            <div class="target-info" id="targetInfo"></div>
+            <button id="clickBtn" class="btn btn-game" disabled>Click when ready!</button>
+            <button id="stopBtn" class="btn btn-secondary">Stop Game</button>
+        </div>
+        
+        <div class="stats-panel">
+            <h2>Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value" id="totalStat">0</div>
+                    <div class="stat-label">Total Attempts</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value success" id="successStat">0</div>
+                    <div class="stat-label">Successes</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value fail" id="failStat">0</div>
+                    <div class="stat-label">Failures</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="accuracyStat">0%</div>
+                    <div class="stat-label">Accuracy</div>
+                </div>
+            </div>
+            <button id="resetStatsBtn" class="btn btn-secondary">Reset Stats</button>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
+
