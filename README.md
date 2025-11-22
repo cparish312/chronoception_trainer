@@ -8,7 +8,8 @@ A web application to train your ability to perceive and predict time intervals (
 - Real-time timer display in minutes:seconds format
 - Continuous gameplay - automatically continues after each attempt
 - Success/failure tracking with live statistics
-- Sound notification when timer expires
+- Sound notification when timer expires (6 beeps)
+- Performance visualization chart
 - Clean, modern UI with visual feedback
 - Deployable on Vercel
 
@@ -16,17 +17,17 @@ A web application to train your ability to perceive and predict time intervals (
 
 1. Install dependencies:
 ```bash
-pip install -r requirements.txt
+npm install
 ```
 
-2. Run the application:
+2. Run the application locally:
 ```bash
-python app.py
+npm start
 ```
 
 3. Open your browser and navigate to:
 ```
-http://127.0.0.1:5000
+http://localhost:3000
 ```
 
 ## How to Play
@@ -45,6 +46,8 @@ http://127.0.0.1:5000
 
 6. **Track your progress** with the statistics panel showing your total attempts, successes, failures, and accuracy percentage
 
+7. **View performance over time** with the visualization chart showing your success/failure pattern
+
 ## Example
 
 - Set Interval: **1 minute** (60 seconds)
@@ -52,11 +55,12 @@ http://127.0.0.1:5000
 - You need to click when the timer shows between **0:55** and **1:00**
 - If you click within this window, you succeed!
 - The game automatically starts a new round after showing the result
+- When the timer expires, you'll hear 6 beeps
 
 ## Requirements
 
-- Python 3.7+
-- Flask 3.0.0+
+- Node.js 18.x or higher
+- npm or yarn
 
 ## Deployment on Vercel
 
@@ -75,9 +79,27 @@ vercel
 3. **Follow the prompts** to link your project and deploy.
 
 The app will be automatically configured with:
-- Serverless function handler in `api/index.py`
+- Serverless function handler in `api/index.js`
 - Static files served from `static/` and `templates/`
-- All routes handled by the Flask app
+- All routes handled by the Express app
 
 **Note**: Game state is stored in memory, so statistics will reset on serverless function cold starts. For production use with persistent state, consider using a database or external storage.
 
+## Project Structure
+
+```
+chronoception_trainer/
+├── api/
+│   └── index.js          # Express serverless function
+├── static/
+│   ├── script.js         # Frontend JavaScript
+│   ├── style.css         # Styles
+│   ├── favicon.ico       # Favicon
+│   └── favicon.png       # Favicon PNG
+├── templates/
+│   └── index.html        # Main HTML template
+├── package.json          # Node.js dependencies
+├── vercel.json           # Vercel configuration
+└── README.md             # This file
+
+```

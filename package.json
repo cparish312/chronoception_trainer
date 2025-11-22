@@ -1,0 +1,25 @@
+{
+  "name": "chronoception-trainer",
+  "version": "1.0.0",
+  "description": "A web application to train your ability to perceive and predict time intervals",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js",
+    "dev": "node api/index.js"
+  },
+  "keywords": [
+    "chronoception",
+    "time",
+    "training",
+    "web-app"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
+

@@ -18,29 +18,33 @@ npm install -g vercel
 cd /path/to/chronoception_trainer
 ```
 
-2. **Deploy to Vercel:**
+2. **Install dependencies:**
+```bash
+npm install
+```
+
+3. **Deploy to Vercel:**
 ```bash
 vercel
 ```
 
-3. **Follow the prompts:**
+4. **Follow the prompts:**
    - Link to existing project or create new
    - Set project name (or use default)
    - Confirm settings
 
-4. **For production deployment:**
+5. **For production deployment:**
 ```bash
 vercel --prod
 ```
 
 ## Project Structure for Vercel
 
-- `api/index.py` - Serverless function handler
-- `app.py` - Main Flask application
+- `api/index.js` - Express serverless function handler
 - `templates/` - HTML templates
-- `static/` - Static files (CSS, JS)
+- `static/` - Static files (CSS, JS, favicons)
 - `vercel.json` - Vercel configuration
-- `requirements.txt` - Python dependencies
+- `package.json` - Node.js dependencies
 
 ## Important Notes
 
@@ -51,6 +55,8 @@ vercel --prod
 
 - **Sound Feature**: The sound notification uses Web Audio API, which works in modern browsers. No external audio files are required.
 
+- **Node.js Version**: Vercel uses Node.js 18.x by default. The project is configured to use Node.js 18+.
+
 ## Troubleshooting
 
 If you encounter issues:
@@ -60,9 +66,9 @@ If you encounter issues:
 vercel logs
 ```
 
-2. **Verify Python version:**
-   - Vercel uses Python 3.9 by default
-   - Check `requirements.txt` for compatibility
+2. **Verify Node.js version:**
+   - Vercel uses Node.js 18.x by default
+   - Check `package.json` for engine requirements
 
 3. **Test locally with Vercel:**
 ```bash
@@ -71,6 +77,13 @@ vercel dev
 
 This will run the app locally using Vercel's runtime environment.
 
+4. **Test locally without Vercel:**
+```bash
+npm start
+```
+
+Then visit `http://localhost:3000`
+
 ## Custom Domain
 
 After deployment, you can add a custom domain in the Vercel dashboard:
@@ -78,3 +91,16 @@ After deployment, you can add a custom domain in the Vercel dashboard:
 2. Navigate to "Domains"
 3. Add your custom domain
 
+## Common Issues
+
+### Function Timeout
+- Vercel has a 10-second timeout for free tier
+- If your function times out, check for infinite loops or long-running operations
+
+### Module Not Found
+- Ensure all dependencies are in `package.json`
+- Run `npm install` before deploying
+
+### Static Files Not Loading
+- Check that paths in HTML use `/static/` (absolute paths)
+- Verify `vercel.json` routes are configured correctly
