@@ -10,6 +10,7 @@ let isGameRunning = false;
 let pendingTimeouts = [];
 let pendingFetchAbortControllers = [];
 let serviceWorkerRegistration = null;
+let isProcessingTimeout = false; // Flag to prevent multiple timeout processing
 
 const setupPanel = document.getElementById('setupPanel');
 const gamePanel = document.getElementById('gamePanel');
@@ -44,8 +45,8 @@ async function registerServiceWorker() {
             navigator.serviceWorker.addEventListener('message', (event) => {
                 if (event.data && event.data.type === 'TIMEOUT_DETECTED') {
                     // Service worker detected a timeout, handle it
-                    // Only handle if we haven't already processed it
-                    if (isGameRunning && clickBtn && !clickBtn.disabled) {
+                    // Only handle if we haven't already processed it and game is running
+                    if (isGameRunning && !isProcessingTimeout) {
                         handleTimeout();
                     }
                 }
@@ -53,10 +54,10 @@ async function registerServiceWorker() {
             
             // Also listen for page visibility changes to check for missed timeouts
             document.addEventListener('visibilitychange', async () => {
-                if (document.visibilityState === 'visible' && isGameRunning && startTime) {
+                if (document.visibilityState === 'visible' && isGameRunning && startTime && !isProcessingTimeout) {
                     // Check if we missed a timeout while in background
                     const elapsed = (Date.now() - startTime) / 1000;
-                    if (elapsed >= currentInterval && clickBtn && !clickBtn.disabled) {
+                    if (elapsed >= currentInterval) {
                         // We missed the timeout, handle it now
                         handleTimeout();
                     }
@@ -364,7 +365,7 @@ async function startGame() {
 }
 
 function updateTimer() {
-    if (!isGameRunning) return;
+    if (!isGameRunning || isProcessingTimeout) return;
     
     const elapsed = (Date.now() - startTime) / 1000;
     
@@ -504,7 +505,13 @@ async function handleClick() {
 }
 
 function startNextRound() {
-    if (!isGameRunning) return;
+    if (!isGameRunning) {
+        isProcessingTimeout = false; // Reset flag if game stopped
+        return;
+    }
+    
+    // Ensure timeout flag is reset
+    isProcessingTimeout = false;
     
     // Create abort controller for this fetch
     const abortController = new AbortController();
@@ -530,12 +537,18 @@ function startNextRound() {
         }
         
         // Check if game is still running before processing response
-        if (!isGameRunning) return null;
+        if (!isGameRunning) {
+            isProcessingTimeout = false;
+            return null;
+        }
         
         return response.json();
     })
     .then(data => {
-        if (!isGameRunning || !data || !data.success) return;
+        if (!isGameRunning || !data || !data.success) {
+            isProcessingTimeout = false;
+            return;
+        }
         
         // Format target window display
         const targetStart = currentInterval - currentTimeBefore;
@@ -572,6 +585,9 @@ function startNextRound() {
             pendingFetchAbortControllers.splice(index, 1);
         }
         
+        // Reset flag on error
+        isProcessingTimeout = false;
+        
         // Ignore abort errors (game was stopped)
         if (error.name !== 'AbortError') {
             console.error('Error starting next round:', error);
@@ -580,7 +596,10 @@ function startNextRound() {
 }
 
 function handleTimeout() {
-    if (!isGameRunning) return;
+    if (!isGameRunning || isProcessingTimeout) return;
+    
+    // Set flag to prevent multiple processing
+    isProcessingTimeout = true;
     
     clearInterval(gameInterval);
     clickBtn.disabled = true;
@@ -613,15 +632,22 @@ function handleTimeout() {
         }
         
         // Check if game is still running before processing response
-        if (!isGameRunning) return null;
+        if (!isGameRunning) {
+            isProcessingTimeout = false;
+            return null;
+        }
         
         return response.json();
     })
     .then(data => {
-        if (!isGameRunning || !data) return;
+        if (!isGameRunning || !data) {
+            isProcessingTimeout = false;
+            return;
+        }
         
         if (data.error) {
             console.error('Error handling timeout:', data.error);
+            isProcessingTimeout = false;
             return;
         }
         
@@ -637,11 +663,18 @@ function handleTimeout() {
         updateStats(data.stats, data.history);
         
         // Automatically start next round after brief delay
+        // Use a longer delay if page was in background to ensure user sees the result
+        const delay = document.visibilityState === 'visible' ? 1500 : 3000;
         const timeoutId = setTimeout(() => {
-            if (!isGameRunning) return;
+            if (!isGameRunning) {
+                isProcessingTimeout = false;
+                return;
+            }
             resultFlash.style.display = 'none';
+            // Reset the flag before starting next round
+            isProcessingTimeout = false;
             startNextRound();
-        }, 1500);
+        }, delay);
         pendingTimeouts.push(timeoutId);
     })
     .catch(error => {
@@ -650,6 +683,9 @@ function handleTimeout() {
         if (index > -1) {
             pendingFetchAbortControllers.splice(index, 1);
         }
+        
+        // Reset flag on error
+        isProcessingTimeout = false;
         
         // Ignore abort errors (game was stopped)
         if (error.name !== 'AbortError') {
@@ -671,6 +707,7 @@ function clearAllPendingOperations() {
 function stopGame() {
     // Set flag to stop game immediately
     isGameRunning = false;
+    isProcessingTimeout = false; // Reset timeout processing flag
     
     // Clear the main game interval
     clearInterval(gameInterval);
@@ -875,10 +912,23 @@ window.addEventListener('resize', () => {
 });
 
 // Handle visibility change to reacquire wake lock if needed
+// Also check if we need to continue game after timeout
 document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible' && gameInterval && !wakeLock) {
-        // Reacquire wake lock if game is running and we lost it
-        await acquireWakeLock();
+    if (document.visibilityState === 'visible') {
+        if (gameInterval && !wakeLock) {
+            // Reacquire wake lock if game is running and we lost it
+            await acquireWakeLock();
+        }
+        
+        // If game is running but no interval is set, we might have missed a timeout
+        // Check with server to see if we need to continue
+        if (isGameRunning && !gameInterval && !isProcessingTimeout && startTime) {
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (elapsed >= currentInterval) {
+                // We missed the timeout, handle it now
+                handleTimeout();
+            }
+        }
     }
 });
 
