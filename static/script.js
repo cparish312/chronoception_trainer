@@ -34,46 +34,54 @@ let performanceChart = null;
 const chartCanvas = document.getElementById('performanceChart');
 
 // Register Service Worker for background notifications
+let serviceWorkerReady = false;
+
 async function registerServiceWorker() {
-    if ('serviceWorker' in navigator) {
-        try {
-            const registration = await navigator.serviceWorker.register('/sw.js');
-            serviceWorkerRegistration = registration;
-            console.log('Service Worker registered successfully');
-            
-            // Listen for messages from service worker
-            navigator.serviceWorker.addEventListener('message', (event) => {
-                if (event.data && event.data.type === 'TIMEOUT_DETECTED') {
-                    // Service worker detected a timeout, handle it
-                    // Only handle if we haven't already processed it and game is running
-                    if (isGameRunning && !isProcessingTimeout) {
-                        handleTimeout();
-                    }
+    if (!('serviceWorker' in navigator)) return;
+    
+    try {
+        const registration = await navigator.serviceWorker.register('/sw.js', {
+            updateViaCache: 'none'
+        });
+        
+        serviceWorkerRegistration = registration;
+        
+        // Wait for service worker to be ready
+        if (registration.installing) {
+            registration.installing.addEventListener('statechange', function() {
+                if (this.state === 'activated') {
+                    serviceWorkerReady = true;
                 }
             });
-            
-            // Note: Visibility change handler is set up at the bottom of the file
-            // to avoid duplicate event listeners
-            
-            // Handle service worker updates
-            registration.addEventListener('updatefound', () => {
-                const newWorker = registration.installing;
-                newWorker.addEventListener('statechange', () => {
-                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                        // New service worker available, prompt user to refresh
-                        console.log('New service worker available');
-                    }
-                });
-            });
-        } catch (error) {
-            console.error('Service Worker registration failed:', error);
+        } else if (registration.waiting) {
+            serviceWorkerReady = true;
+        } else if (registration.active) {
+            serviceWorkerReady = true;
+        }
+        
+        // Listen for messages from service worker (only once)
+        navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+        
+    } catch (error) {
+        console.error('Service Worker registration failed:', error);
+    }
+}
+
+// Handle messages from service worker
+function handleServiceWorkerMessage(event) {
+    if (event.data && event.data.type === 'TIMEOUT_DETECTED') {
+        // Only handle if we haven't already processed it and game is running
+        if (isGameRunning && !isProcessingTimeout) {
+            handleTimeout();
         }
     }
 }
 
 // Send message to service worker
 function sendMessageToServiceWorker(message) {
-    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    if (!serviceWorkerReady) return;
+    
+    if (navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage(message);
     } else if (serviceWorkerRegistration && serviceWorkerRegistration.active) {
         serviceWorkerRegistration.active.postMessage(message);
@@ -902,45 +910,34 @@ window.addEventListener('resize', () => {
     }, 250);
 });
 
-// Handle visibility change to reacquire wake lock if needed
-// Also check if we need to continue game after timeout
-// And ensure service worker is still checking for active games
+// Handle visibility change - simplified
 document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible') {
+        // Reacquire wake lock if needed
         if (gameInterval && !wakeLock) {
-            // Reacquire wake lock if game is running and we lost it
             await acquireWakeLock();
         }
         
-        // If game is running but no interval is set, we might have missed a timeout
-        // Check with server to see if we need to continue
+        // Check if we missed a timeout while in background
         if (isGameRunning && !gameInterval && !isProcessingTimeout && startTime) {
             const elapsed = (Date.now() - startTime) / 1000;
             if (elapsed >= currentInterval) {
-                // We missed the timeout, handle it now
                 handleTimeout();
             }
         }
         
-        // If game is running and we have an interval, ensure service worker is checking
-        // This handles the case where the service worker stopped checking when page was in background
-        // This is critical for mobile devices where the service worker might have been paused
+        // Restart service worker checking if game is active
+        // This ensures it continues after page was in background
         if (isGameRunning && gameInterval && startTime && currentInterval) {
-            // Calculate when timeout should occur
             const elapsed = (Date.now() - startTime) / 1000;
             const timeRemaining = currentInterval - elapsed;
             
             if (timeRemaining > 0) {
-                // Game is still active, ensure service worker knows about it
-                // This restarts the service worker checking if it was paused
                 const timeoutTime = Date.now() + (timeRemaining * 1000);
                 sendMessageToServiceWorker({
                     type: 'START_GAME',
                     timeoutTime: timeoutTime
                 });
-            } else if (timeRemaining <= 0 && !isProcessingTimeout) {
-                // Timeout should have occurred, handle it
-                handleTimeout();
             }
         }
     }
