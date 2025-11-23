@@ -72,6 +72,8 @@ self.addEventListener('message', (event) => {
 });
 
 let timeoutCheckInterval = null;
+let lastTimeoutNotificationTime = 0;
+const TIMEOUT_NOTIFICATION_COOLDOWN = 5000; // Don't show notification again for 5 seconds
 
 function startTimeoutChecking(timeoutTime) {
   // Clear any existing interval
@@ -79,14 +81,17 @@ function startTimeoutChecking(timeoutTime) {
     clearInterval(timeoutCheckInterval);
   }
   
+  // Reset notification cooldown when starting a new game
+  lastTimeoutNotificationTime = 0;
+  
   // Calculate when to check (every second until timeout)
   const now = Date.now();
   const timeUntilTimeout = timeoutTime - now;
   
   if (timeUntilTimeout <= 0) {
-    // Already timed out
-    showTimeoutNotification();
-    return;
+    // Already timed out, check immediately
+    checkTimeout();
+    // Still start periodic checking in case game continues
   }
   
   // Check periodically (every 5 seconds to reduce battery usage)
@@ -97,15 +102,10 @@ function startTimeoutChecking(timeoutTime) {
   
   // Also set a one-time check for the exact timeout time
   // This will fire even if the browser is closed (on supported platforms)
-  setTimeout(() => {
-    checkTimeout();
-  }, timeUntilTimeout);
-  
-  // Register a background sync for the timeout time (if supported)
-  if ('sync' in self.registration) {
-    // Calculate delay until timeout
-    const delay = Math.max(0, timeUntilTimeout);
-    // Note: Background sync has limitations, but it's a good fallback
+  if (timeUntilTimeout > 0) {
+    setTimeout(() => {
+      checkTimeout();
+    }, timeUntilTimeout);
   }
 }
 
@@ -132,19 +132,29 @@ async function checkTimeout() {
       const data = await response.json();
       
       if (data.timedOut && data.isRunning) {
-        // Only show notification if game is still running (hasn't been processed yet)
-        showTimeoutNotification();
-        stopTimeoutChecking();
+        // Only show notification if game is still running and we haven't shown one recently
+        const now = Date.now();
+        if (now - lastTimeoutNotificationTime > TIMEOUT_NOTIFICATION_COOLDOWN) {
+          showTimeoutNotification();
+          lastTimeoutNotificationTime = now;
+        }
         
-        // Notify all clients
+        // Notify all clients - but don't stop checking
+        // The client will send STOP_GAME when it processes the timeout
+        // If client starts a new round, it will send START_GAME which will update the timeout time
         const clients = await self.clients.matchAll();
         clients.forEach(client => {
           client.postMessage({ type: 'TIMEOUT_DETECTED' });
         });
+        
+        // Continue checking - don't stop here
+        // The client will handle stopping when appropriate
       } else if (!data.isRunning) {
         // Game stopped, stop checking
         stopTimeoutChecking();
+        lastTimeoutNotificationTime = 0;
       }
+      // If data.timedOut is false but isRunning is true, keep checking (game still active)
     }
   } catch (error) {
     console.error('Error checking timeout:', error);

@@ -52,17 +52,8 @@ async function registerServiceWorker() {
                 }
             });
             
-            // Also listen for page visibility changes to check for missed timeouts
-            document.addEventListener('visibilitychange', async () => {
-                if (document.visibilityState === 'visible' && isGameRunning && startTime && !isProcessingTimeout) {
-                    // Check if we missed a timeout while in background
-                    const elapsed = (Date.now() - startTime) / 1000;
-                    if (elapsed >= currentInterval) {
-                        // We missed the timeout, handle it now
-                        handleTimeout();
-                    }
-                }
-            });
+            // Note: Visibility change handler is set up at the bottom of the file
+            // to avoid duplicate event listeners
             
             // Handle service worker updates
             registration.addEventListener('updatefound', () => {
@@ -913,6 +904,7 @@ window.addEventListener('resize', () => {
 
 // Handle visibility change to reacquire wake lock if needed
 // Also check if we need to continue game after timeout
+// And ensure service worker is still checking for active games
 document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible') {
         if (gameInterval && !wakeLock) {
@@ -926,6 +918,28 @@ document.addEventListener('visibilitychange', async () => {
             const elapsed = (Date.now() - startTime) / 1000;
             if (elapsed >= currentInterval) {
                 // We missed the timeout, handle it now
+                handleTimeout();
+            }
+        }
+        
+        // If game is running and we have an interval, ensure service worker is checking
+        // This handles the case where the service worker stopped checking when page was in background
+        // This is critical for mobile devices where the service worker might have been paused
+        if (isGameRunning && gameInterval && startTime && currentInterval) {
+            // Calculate when timeout should occur
+            const elapsed = (Date.now() - startTime) / 1000;
+            const timeRemaining = currentInterval - elapsed;
+            
+            if (timeRemaining > 0) {
+                // Game is still active, ensure service worker knows about it
+                // This restarts the service worker checking if it was paused
+                const timeoutTime = Date.now() + (timeRemaining * 1000);
+                sendMessageToServiceWorker({
+                    type: 'START_GAME',
+                    timeoutTime: timeoutTime
+                });
+            } else if (timeRemaining <= 0 && !isProcessingTimeout) {
+                // Timeout should have occurred, handle it
                 handleTimeout();
             }
         }
