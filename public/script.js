@@ -471,7 +471,7 @@ async function handleClick() {
         updateStats(data.stats, data.history);
         
         // Automatically start next round after brief delay
-        scheduleNextRound(1500);
+        scheduleNextRound(2500); // 2.5 seconds to show result
         
     } catch (error) {
         // Remove abort controller from pending list
@@ -585,7 +585,7 @@ async function startNextRound() {
     }
 }
 
-function scheduleNextRound(delay = 1500) {
+function scheduleNextRound(delay = 2500) {
     if (!isGameRunning) return;
     
     if (nextRoundTimeoutId) {
@@ -593,17 +593,38 @@ function scheduleNextRound(delay = 1500) {
     }
     
     pendingNextRound = true;
+    console.log('Scheduling next round in', delay, 'ms');
+    
     nextRoundTimeoutId = setTimeout(() => {
         nextRoundTimeoutId = null;
         if (!isGameRunning) {
             pendingNextRound = false;
             return;
         }
+        console.log('Scheduled timeout fired, starting next round');
         pendingNextRound = false;
         startNextRound();
     }, delay);
     
     pendingTimeouts.push(nextRoundTimeoutId);
+    
+    // Also set a backup check in case setTimeout is throttled
+    // Check again after delay + 2 seconds
+    const backupDelay = delay + 2000;
+    const backupTimeoutId = setTimeout(() => {
+        // If still pending and game running, force start
+        if (pendingNextRound && isGameRunning && !isStartingNextRound) {
+            console.warn('Backup timeout triggered - main setTimeout may have been throttled');
+            pendingNextRound = false;
+            if (nextRoundTimeoutId) {
+                clearTimeout(nextRoundTimeoutId);
+                nextRoundTimeoutId = null;
+            }
+            startNextRound();
+        }
+    }, backupDelay);
+    
+    pendingTimeouts.push(backupTimeoutId);
 }
 
 function forceStartNextRound() {
@@ -690,7 +711,7 @@ function handleTimeout() {
         
         // Automatically start next round after brief delay
         // Use a longer delay if page was in background to ensure user sees the result
-        const delay = document.visibilityState === 'visible' ? 1500 : 3000;
+        const delay = document.visibilityState === 'visible' ? 2500 : 3500;
         scheduleNextRound(delay);
     })
     .catch(error => {
@@ -934,19 +955,52 @@ window.addEventListener('resize', () => {
     }, 250);
 });
 
-// Handle visibility change - simplified
+// Handle visibility change - simplified with better recovery
 document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible') {
+        console.log('Page became visible, checking game state');
+        
         // Reacquire wake lock if needed
         if (gameInterval && !wakeLock) {
             await acquireWakeLock();
+        }
+        
+        // If we have a pending next round (e.g., the timeout fired while backgrounded), start it now
+        if (pendingNextRound) {
+            console.log('Forcing pending next round to start');
+            resultFlash.style.display = 'none'; // Hide any result that might be showing
+            forceStartNextRound();
+            return; // Don't do other checks if we're starting a round
+        }
+        
+        // Check if game is stalled (running but no interval and not processing timeout)
+        // This can happen if timeout occurred in background but next round didn't start
+        if (isGameRunning && !gameInterval && !isProcessingTimeout && !pendingNextRound && !isStartingNextRound) {
+            console.log('Detected stalled game state, attempting recovery');
+            
+            // Check if we should have had a timeout
+            if (startTime) {
+                const elapsed = (Date.now() - startTime) / 1000;
+                if (elapsed >= currentInterval) {
+                    console.log('Missed timeout detected, handling now');
+                    handleTimeout();
+                    return;
+                }
+            }
+            
+            // If no startTime or not timed out yet, try starting next round
+            console.log('Starting next round to recover from stalled state');
+            startNextRound();
+            return;
         }
         
         // Check if we missed a timeout while in background
         if (isGameRunning && !gameInterval && !isProcessingTimeout && startTime) {
             const elapsed = (Date.now() - startTime) / 1000;
             if (elapsed >= currentInterval) {
+                console.log('Timeout missed while in background, handling now');
                 handleTimeout();
+                return;
             }
         }
         
@@ -958,15 +1012,12 @@ document.addEventListener('visibilitychange', async () => {
             
             if (timeRemaining > 0) {
                 const timeoutTime = Date.now() + (timeRemaining * 1000);
+                console.log('Restarting service worker with', timeRemaining, 'seconds remaining');
                 sendMessageToServiceWorker({
                     type: 'START_GAME',
                     timeoutTime: timeoutTime
                 });
             }
-        }
-        
-        if (pendingNextRound) {
-            forceStartNextRound();
         }
     }
 });
