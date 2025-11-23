@@ -37,8 +37,6 @@ let performanceChart = null;
 const chartCanvas = document.getElementById('performanceChart');
 
 // Register Service Worker for background notifications
-let serviceWorkerReady = false;
-
 async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
     
@@ -49,22 +47,10 @@ async function registerServiceWorker() {
         
         serviceWorkerRegistration = registration;
         
-        // Wait for service worker to be ready
-        if (registration.installing) {
-            registration.installing.addEventListener('statechange', function() {
-                if (this.state === 'activated') {
-                    serviceWorkerReady = true;
-                }
-            });
-        } else if (registration.waiting) {
-            serviceWorkerReady = true;
-        } else if (registration.active) {
-            serviceWorkerReady = true;
-        }
-        
         // Listen for messages from service worker (only once)
         navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
         
+        console.log('Service Worker registered successfully');
     } catch (error) {
         console.error('Service Worker registration failed:', error);
     }
@@ -75,6 +61,7 @@ function handleServiceWorkerMessage(event) {
     if (event.data && event.data.type === 'TIMEOUT_DETECTED') {
         // Only handle if we haven't already processed it and game is running
         if (isGameRunning && !isProcessingTimeout) {
+            console.log('Timeout detected by service worker');
             handleTimeout();
         }
     }
@@ -82,12 +69,17 @@ function handleServiceWorkerMessage(event) {
 
 // Send message to service worker
 function sendMessageToServiceWorker(message) {
-    if (!serviceWorkerReady) return;
+    if (!navigator.serviceWorker) return;
     
+    // Try controller first (for active service worker)
     if (navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage(message);
+        console.log('Message sent to service worker via controller:', message.type);
     } else if (serviceWorkerRegistration && serviceWorkerRegistration.active) {
         serviceWorkerRegistration.active.postMessage(message);
+        console.log('Message sent to service worker via registration:', message.type);
+    } else {
+        console.warn('Service worker not ready yet, message not sent:', message.type);
     }
 }
 
