@@ -11,6 +11,9 @@ let pendingTimeouts = [];
 let pendingFetchAbortControllers = [];
 let serviceWorkerRegistration = null;
 let isProcessingTimeout = false; // Flag to prevent multiple timeout processing
+let pendingNextRound = false;
+let nextRoundTimeoutId = null;
+let isStartingNextRound = false;
 
 const setupPanel = document.getElementById('setupPanel');
 const gamePanel = document.getElementById('gamePanel');
@@ -476,13 +479,7 @@ async function handleClick() {
         updateStats(data.stats, data.history);
         
         // Automatically start next round after brief delay
-        const timeoutId = setTimeout(() => {
-            if (!isGameRunning) return;
-            resultFlash.style.display = 'none';
-            // Start next round automatically
-            startNextRound();
-        }, 1500); // Show result for 1.5 seconds
-        pendingTimeouts.push(timeoutId);
+        scheduleNextRound(1500);
         
     } catch (error) {
         // Remove abort controller from pending list
@@ -503,51 +500,61 @@ async function handleClick() {
     }
 }
 
-function startNextRound() {
+async function startNextRound() {
     if (!isGameRunning) {
-        isProcessingTimeout = false; // Reset flag if game stopped
+        isProcessingTimeout = false;
+        pendingNextRound = false;
+        if (nextRoundTimeoutId) {
+            clearTimeout(nextRoundTimeoutId);
+            nextRoundTimeoutId = null;
+        }
         return;
     }
     
-    // Ensure timeout flag is reset
-    isProcessingTimeout = false;
+    if (isStartingNextRound) {
+        return;
+    }
     
-    // Create abort controller for this fetch
+    isStartingNextRound = true;
+    isProcessingTimeout = false;
+    pendingNextRound = false;
+    
+    if (nextRoundTimeoutId) {
+        clearTimeout(nextRoundTimeoutId);
+        nextRoundTimeoutId = null;
+    }
+    
+    resultFlash.style.display = 'none';
+    
     const abortController = new AbortController();
     pendingFetchAbortControllers.push(abortController);
     
-    // Start a new round with the same settings
-    fetch('/api/start', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-            interval: currentIntervalMinutes, 
-            time_before: currentTimeBefore 
-        }),
-        signal: abortController.signal
-    })
-    .then(response => {
-        // Remove abort controller from pending list
-        const index = pendingFetchAbortControllers.indexOf(abortController);
-        if (index > -1) {
-            pendingFetchAbortControllers.splice(index, 1);
-        }
+    try {
+        const response = await fetch('/api/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                interval: currentIntervalMinutes,
+                time_before: currentTimeBefore
+            }),
+            signal: abortController.signal
+        });
         
-        // Check if game is still running before processing response
         if (!isGameRunning) {
-            isProcessingTimeout = false;
-            return null;
-        }
-        
-        return response.json();
-    })
-    .then(data => {
-        if (!isGameRunning || !data || !data.success) {
-            isProcessingTimeout = false;
             return;
         }
+        
+        const data = await response.json();
+        if (!data || !data.success) {
+            return;
+        }
+        
+        // Update current interval info from server response (keeps client/server in sync)
+        currentInterval = data.interval ?? currentInterval;
+        currentIntervalMinutes = data.interval_minutes ?? currentIntervalMinutes;
+        currentTimeBefore = data.time_before ?? currentTimeBefore;
         
         // Format target window display
         const targetStart = currentInterval - currentTimeBefore;
@@ -563,7 +570,6 @@ function startNextRound() {
         clickBtn.textContent = 'It is time!';
         
         // Set startTime to current client time right before starting timer
-        // This ensures the timer starts at 0:00.00 instead of showing network delay
         startTime = Date.now();
         
         // Notify service worker about the new timeout time
@@ -576,22 +582,53 @@ function startNextRound() {
         
         // Start timer
         gameInterval = setInterval(updateTimer, 10);
-    })
-    .catch(error => {
-        // Remove abort controller from pending list
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('Error starting next round:', error);
+        }
+    } finally {
         const index = pendingFetchAbortControllers.indexOf(abortController);
         if (index > -1) {
             pendingFetchAbortControllers.splice(index, 1);
         }
-        
-        // Reset flag on error
-        isProcessingTimeout = false;
-        
-        // Ignore abort errors (game was stopped)
-        if (error.name !== 'AbortError') {
-            console.error('Error starting next round:', error);
+        isStartingNextRound = false;
+    }
+}
+
+function scheduleNextRound(delay = 1500) {
+    if (!isGameRunning) return;
+    
+    if (nextRoundTimeoutId) {
+        clearTimeout(nextRoundTimeoutId);
+    }
+    
+    pendingNextRound = true;
+    nextRoundTimeoutId = setTimeout(() => {
+        nextRoundTimeoutId = null;
+        if (!isGameRunning) {
+            pendingNextRound = false;
+            return;
         }
-    });
+        pendingNextRound = false;
+        startNextRound();
+    }, delay);
+    
+    pendingTimeouts.push(nextRoundTimeoutId);
+}
+
+function forceStartNextRound() {
+    if (!pendingNextRound) return;
+    
+    if (nextRoundTimeoutId) {
+        clearTimeout(nextRoundTimeoutId);
+        nextRoundTimeoutId = null;
+    }
+    
+    pendingNextRound = false;
+    
+    if (!isStartingNextRound) {
+        startNextRound();
+    }
 }
 
 function handleTimeout() {
@@ -664,17 +701,7 @@ function handleTimeout() {
         // Automatically start next round after brief delay
         // Use a longer delay if page was in background to ensure user sees the result
         const delay = document.visibilityState === 'visible' ? 1500 : 3000;
-        const timeoutId = setTimeout(() => {
-            if (!isGameRunning) {
-                isProcessingTimeout = false;
-                return;
-            }
-            resultFlash.style.display = 'none';
-            // Reset the flag before starting next round
-            isProcessingTimeout = false;
-            startNextRound();
-        }, delay);
-        pendingTimeouts.push(timeoutId);
+        scheduleNextRound(delay);
     })
     .catch(error => {
         // Remove abort controller from pending list
@@ -697,6 +724,13 @@ function clearAllPendingOperations() {
     // Clear all pending timeouts
     pendingTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
     pendingTimeouts = [];
+    
+    if (nextRoundTimeoutId) {
+        clearTimeout(nextRoundTimeoutId);
+        nextRoundTimeoutId = null;
+    }
+    pendingNextRound = false;
+    isStartingNextRound = false;
     
     // Abort all pending fetch requests
     pendingFetchAbortControllers.forEach(controller => controller.abort());
@@ -939,6 +973,11 @@ document.addEventListener('visibilitychange', async () => {
                     timeoutTime: timeoutTime
                 });
             }
+        }
+        
+        // If we have a pending next round (e.g., the timeout fired while backgrounded), start it now
+        if (pendingNextRound) {
+            forceStartNextRound();
         }
     }
 });
